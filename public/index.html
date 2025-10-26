@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🐞 Ladybug - File Storage Server</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🐞 Ladybug Server</h1>
+            <p>Upload and store any type of file - videos, images, documents, and more!</p>
+        </header>
+
+        <div class="upload-section">
+            <div class="upload-box" id="uploadBox">
+                <input type="file" id="fileInput" multiple hidden>
+                <div class="upload-icon">📁</div>
+                <h2>Drop files here or click to upload</h2>
+                <p>Supports all file types • Max 100MB per file</p>
+                <button class="btn btn-primary" onclick="document.getElementById('fileInput').click()">
+                    Choose Files
+                </button>
+            </div>
+
+            <div id="uploadProgress" class="upload-progress" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <p id="progressText">Uploading...</p>
+            </div>
+
+            <div id="uploadResults" class="upload-results"></div>
+        </div>
+
+        <div class="files-section">
+            <div class="section-header">
+                <h2>📦 Uploaded Files</h2>
+                <button class="btn btn-secondary" onclick="loadFiles()">
+                    🔄 Refresh
+                </button>
+            </div>
+            <div id="filesList" class="files-list">
+                <p class="loading">Loading files...</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const uploadBox = document.getElementById('uploadBox');
+        const fileInput = document.getElementById('fileInput');
+        const uploadProgress = document.getElementById('uploadProgress');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const uploadResults = document.getElementById('uploadResults');
+        const filesList = document.getElementById('filesList');
+
+        // Drag and drop handlers
+        uploadBox.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadBox.classList.add('dragover');
+        });
+
+        uploadBox.addEventListener('dragleave', () => {
+            uploadBox.classList.remove('dragover');
+        });
+
+        uploadBox.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadBox.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            handleFiles(files);
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        async function handleFiles(files) {
+            if (files.length === 0) return;
+
+            uploadProgress.style.display = 'block';
+            uploadResults.innerHTML = '';
+
+            const formData = new FormData();
+            
+            if (files.length === 1) {
+                formData.append('file', files[0]);
+                await uploadSingle(formData, files[0].name);
+            } else {
+                for (let file of files) {
+                    formData.append('files', file);
+                }
+                await uploadMultiple(formData, files.length);
+            }
+
+            fileInput.value = '';
+            loadFiles();
+        }
+
+        async function uploadSingle(formData, filename) {
+            try {
+                progressText.textContent = `Uploading ${filename}...`;
+                
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                
+                uploadProgress.style.display = 'none';
+                
+                if (result.success) {
+                    showUploadResult(result.data);
+                } else {
+                    showError(result.message);
+                }
+            } catch (error) {
+                uploadProgress.style.display = 'none';
+                showError('Upload failed: ' + error.message);
+            }
+        }
+
+        async function uploadMultiple(formData, fileCount) {
+            try {
+                progressText.textContent = `Uploading ${fileCount} files...`;
+                
+                const response = await fetch('/upload-multiple', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                
+                uploadProgress.style.display = 'none';
+                
+                if (result.success) {
+                    result.data.forEach(file => showUploadResult(file));
+                } else {
+                    showError(result.message);
+                }
+            } catch (error) {
+                uploadProgress.style.display = 'none';
+                showError('Upload failed: ' + error.message);
+            }
+        }
+
+        function showUploadResult(file) {
+            const resultDiv = document.createElement('div');
+            resultDiv.className = 'upload-result success';
+            resultDiv.innerHTML = `
+                <div class="result-info">
+                    <strong>✅ ${file.originalName}</strong>
+                    <p>Size: ${formatFileSize(file.size)}</p>
+                </div>
+                <div class="result-urls">
+                    <div class="url-box">
+                        <label>View URL:</label>
+                        <div class="url-input-group">
+                            <input type="text" value="${file.url}" readonly onclick="this.select()">
+                            <button onclick="copyToClipboard('${file.url}')">📋 Copy</button>
+                        </div>
+                    </div>
+                    <div class="url-box">
+                        <label>Download URL:</label>
+                        <div class="url-input-group">
+                            <input type="text" value="${file.downloadUrl}" readonly onclick="this.select()">
+                            <button onclick="copyToClipboard('${file.downloadUrl}')">📋 Copy</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            uploadResults.appendChild(resultDiv);
+        }
+
+        function showError(message) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'upload-result error';
+            errorDiv.innerHTML = `<strong>❌ Error:</strong> ${message}`;
+            uploadResults.appendChild(errorDiv);
+        }
+
+        async function loadFiles() {
+            try {
+                filesList.innerHTML = '<p class="loading">Loading files...</p>';
+                
+                const response = await fetch('/api/files');
+                const result = await response.json();
+
+                if (result.success && result.data.length > 0) {
+                    filesList.innerHTML = '';
+                    result.data.reverse().forEach(file => {
+                        const fileCard = createFileCard(file);
+                        filesList.appendChild(fileCard);
+                    });
+                } else {
+                    filesList.innerHTML = '<p class="no-files">No files uploaded yet. Upload your first file above!</p>';
+                }
+            } catch (error) {
+                filesList.innerHTML = '<p class="error">Error loading files</p>';
+            }
+        }
+
+        function createFileCard(file) {
+            const card = document.createElement('div');
+            card.className = 'file-card';
+            
+            const fileIcon = getFileIcon(file.filename);
+            const uploadDate = new Date(file.uploadDate).toLocaleString();
+            
+            card.innerHTML = `
+                <div class="file-icon">${fileIcon}</div>
+                <div class="file-info">
+                    <strong>${file.filename}</strong>
+                    <p>Size: ${formatFileSize(file.size)} • Uploaded: ${uploadDate}</p>
+                </div>
+                <div class="file-actions">
+                    <button class="btn-small" onclick="window.open('${file.url}', '_blank')">👁️ View</button>
+                    <button class="btn-small" onclick="window.open('${file.downloadUrl}', '_blank')">⬇️ Download</button>
+                    <button class="btn-small btn-danger" onclick="deleteFile('${file.filename}')">🗑️ Delete</button>
+                    <button class="btn-small" onclick="copyToClipboard('${file.url}')">📋 Copy URL</button>
+                </div>
+            `;
+            
+            return card;
+        }
+
+        function getFileIcon(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            const icons = {
+                'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️', 'webp': '🖼️',
+                'mp4': '🎥', 'avi': '🎥', 'mov': '🎥', 'wmv': '🎥', 'mkv': '🎥',
+                'mp3': '🎵', 'wav': '🎵', 'flac': '🎵', 'aac': '🎵',
+                'pdf': '📄', 'doc': '📝', 'docx': '📝', 'txt': '📝',
+                'zip': '📦', 'rar': '📦', '7z': '📦',
+                'exe': '⚙️', 'apk': '📱'
+            };
+            return icons[ext] || '📎';
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        async function deleteFile(filename) {
+            if (!confirm('Are you sure you want to delete this file?')) return;
+
+            try {
+                const response = await fetch(`/api/files/${filename}`, {
+                    method: 'DELETE'
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    loadFiles();
+                } else {
+                    alert('Error deleting file: ' + result.message);
+                }
+            } catch (error) {
+                alert('Error deleting file: ' + error.message);
+            }
+        }
+
+        function copyToClipboard(text) {
+            navigator.clipboard.writeText(text).then(() => {
+                // Show temporary feedback
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.textContent = '✅ Copied!';
+                setTimeout(() => {
+                    btn.textContent = originalText;
+                }, 2000);
+            });
+        }
+
+        // Load files on page load
+        loadFiles();
+    </script>
+</body>
+</html>
